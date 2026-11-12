@@ -870,7 +870,6 @@ function freshState() {
     route: null,
     ministers: 0,
     totalPom: 0,
-    streakBase: 0,
     cycle: 0,
     phase: 'idle',
     task: '',
@@ -880,7 +879,7 @@ function freshState() {
     daily: {},
     alarms: [],
     settings: { sound: true, voice: true, notify: true, autoNext: false },
-    guard: { asked: false, enabled: false, leaveSec: 2, voidPunish: false, shot: false, hits: 0, shots: 0, lastAway: 0 },
+    guard: { asked: false, enabled: false, leaveSec: 2, voidPunish: false, shot: false, hits: 0, shots: 0, lastAway: 0, vScreen: false, vCam: false, vOcr: false, vFace: false },
     timer: { end: null, total: 0, remain: 0 }
   };
 }
@@ -906,7 +905,8 @@ function loadState() {
 let S = loadState();
 
 function save() {
-  try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {}
+  try { localStorage.setItem(KEY, JSON.stringify(S)); }
+  catch (e) { console.warn('[景仁宫] 存档写入失败，可能存储空间已满：', e); }
 }
 
 function todayStat() {
@@ -1448,7 +1448,8 @@ function tick() {
     $('#timeText').textContent = fmt(remain);
     const p = S.timer.total ? Math.max(0, remain) / S.timer.total : 1;
     $('#ringFg').style.strokeDashoffset = (CIRC * (1 - p)).toFixed(1);
-    document.title = fmt(remain) + ' · 景仁宫';
+    if (!(window.__JRG_WATCH__ && window.__JRG_WATCH__.ringing && window.__JRG_WATCH__.ringing()))
+      document.title = fmt(remain) + ' · 景仁宫';   // 响铃时让位给「速回景仁宫」的闪烁标题
   }
 }
 
@@ -2596,6 +2597,13 @@ function init() {
 
   $('#taskInput').value = S.task || '';
   $('#taskInput').addEventListener('input', e => { S.task = e.target.value.trim(); });
+  $('#taskInput').addEventListener('keydown', e => {
+    if (e.key !== 'Enter' || e.isComposing) return;   // 中文输入法选词回车不触发
+    if (S.phase !== 'idle') return;
+    e.preventDefault();
+    if (window.__JRG_WATCH__ && window.__JRG_WATCH__.gate) window.__JRG_WATCH__.gate(startFocus);
+    else startFocus();
+  });
 
   $('#btnStart').addEventListener('click', startFocus);
   $('#btnAbort').addEventListener('click', askAbort);
@@ -2720,7 +2728,7 @@ if (document.readyState !== 'loading') init();
 /* ================= 分心守望 ================= */
 (function () {
   'use strict';
-  const DEF = { asked: false, enabled: false, leaveSec: 2, voidPunish: false, shot: false, hits: 0, shots: 0, lastAway: 0 };
+  const DEF = { asked: false, enabled: false, leaveSec: 2, voidPunish: false, shot: false, hits: 0, shots: 0, lastAway: 0, vScreen: false, vCam: false, vOcr: false, vFace: false };
   const $ = sel => document.querySelector(sel);
   function cfg() {
     if (!S.guard) S.guard = {};
@@ -2769,16 +2777,19 @@ if (document.readyState !== 'loading') init();
         <ul class="jw-list">
           <li><b>离开监视</b>：记录你切走页面、切到别的窗口的次数与时长。浏览器无权得知你具体打开了哪个软件，也不会上传任何内容。</li>
           <li><b>响铃与通知</b>：离开超过阈值立即响铃，并向系统推送「速回景仁宫」；你回到本页后执行鞭笞。</li>
-          <li><b>截屏留证（可选）</b>：开启后浏览器会弹出共享屏幕授权，只在命中分心时于本机截一张图作罪证，绝不上传。</li>
+          <li><b>屏幕守望（可选）</b>：开启后浏览器会弹出共享屏幕授权——命中分心时于本机截一张图作罪证，并每 20 秒静默巡检一次屏幕（挂机 / 娱乐识别），绝不上传。</li>
+          <li><b>摄像头守望（可选）</b>：每 20 秒抓一帧，在本机识别离席、瞌睡与视线偏离；画面绝不保存、绝不上传。</li>
         </ul>
         <label class="jw-check"><input type="checkbox" id="jwAgree"> 我已知晓并允许上述监视</label>
-        <label class="jw-check"><input type="checkbox" id="jwShot"> 允许截屏留证（会弹出浏览器共享屏幕授权）</label>
+        <label class="jw-check"><input type="checkbox" id="jwShot"> 允许屏幕守望（截屏留证 + 每 20 秒静默巡检，会弹出共享屏幕授权）</label>
+        <label class="jw-check"><input type="checkbox" id="jwVision" checked> 屏幕巡检判定（挂机 / 娱乐识别，仅本机分析）</label>
+        <label class="jw-check"><input type="checkbox" id="jwCam"> 允许摄像头守望（离席 / 瞌睡识别，仅本机分析）</label>
         <div class="jw-row"><span>离开判定阈值</span><input type="number" id="jwSec" min="1" max="60" value="2"><span>秒</span></div>
         <div class="jw-actions">
           <button class="btn gold" id="jwAllow" disabled>允准并燃香</button>
           <button class="btn ghost" id="jwDeny">暂不监视</button>
         </div>
-        <p class="jw-tip">桌面版可真正识别抖音 / 快手 / 哔哩哔哩等前台程序，并把鞭笞窗口强制置顶到所有软件之上；网页版受浏览器沙箱限制，只能判断你是否离开了本页。</p>
+        <p class="jw-tip">所有画面仅在本机分析，绝不上传。开启 OCR 关键词 / 人脸姿态增强后需联网加载一次识别模型（约 20MB），未加载时以帧差运动启发式兜底。桌面版可真正识别抖音 / 快手 / 哔哩哔哩等前台程序，并把鞭笞窗口强制置顶到所有软件之上。</p>
       </div>`;
     document.body.appendChild(el);
 
@@ -2794,9 +2805,12 @@ if (document.readyState !== 'loading') init();
       if (window.Notification && Notification.permission === 'default') {
         try { const pr = Notification.requestPermission(); if (pr && pr.catch) pr.catch(() => {}); } catch (e) {}
       }
-      if (el.querySelector('#jwShot').checked) await askScreen();
+      c.vScreen = el.querySelector('#jwVision').checked;
+      if (el.querySelector('#jwShot').checked) await askScreen(); else c.shot = false;
+      if (el.querySelector('#jwCam').checked) await askCam();
+      save();
       closeAuth();
-      toast('已允准守望：离开超过 ' + c.leaveSec + ' 秒即响铃鞭笞');
+      toast('已允准守望：离开超过 ' + c.leaveSec + ' 秒即响铃鞭笞' + ((c.shot && c.vScreen) || c.vCam ? '，每 20 秒巡检一次' : ''));
       startFocus();
     });
 
@@ -2814,6 +2828,12 @@ if (document.readyState !== 'loading') init();
     const c = cfg();
     const sec = $('#jwSec');
     if (sec) sec.value = c.leaveSec;
+    if (c.asked) {   // 只回显已持久化的选择，首次保持 HTML 默认
+      const sv = $('#jwShot'), sn = $('#jwVision'), sm = $('#jwCam');
+      if (sv) sv.checked = !!c.shot;
+      if (sn) sn.checked = !!c.vScreen;
+      if (sm) sm.checked = !!c.vCam;
+    }
     $('#jrgWatchAuth').classList.add('show');
   }
   function closeAuth() { const el = $('#jrgWatchAuth'); if (el) el.classList.remove('show'); }
@@ -2826,6 +2846,7 @@ if (document.readyState !== 'loading') init();
     }
     try {
       suppressUntil = Date.now() + 20000;
+      stopScreen();   // 先停旧流，避免重复开启时轨道泄漏
       stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 2 }, audio: false });
       video = document.createElement('video');
       video.muted = true; video.playsInline = true; video.srcObject = stream;
@@ -2834,28 +2855,286 @@ if (document.readyState !== 'loading') init();
       try { await video.play(); } catch (e) {}
       const track = stream.getVideoTracks()[0];
       if (track) track.addEventListener('ended', () => {
-        c.shot = false; save(); toast('屏幕共享已停止，截屏留证关闭');
+        stopScreen();
+        c.shot = false; save(); toast('屏幕共享已停止，截屏留证与屏幕巡检关闭');
       });
       c.shot = true; save();
       return true;
     } catch (e) {
+      stopScreen();
       c.shot = false; save();
       toast('未获得屏幕共享授权，已跳过留证');
       return false;
     }
   }
-  function grabShot() {
+  function stopScreen() {
+    try { if (stream) stream.getTracks().forEach(t => t.stop()); } catch (e) {}
+    try { if (video) video.remove(); } catch (e) {}
+    stream = null; video = null;
+    V.screenPrev = null; V.screenHistory = []; V.stillNudged = false;
+  }
+  function snapURL(vid, maxW, q) {
     try {
-      if (!cfg().shot || !video || !video.videoWidth) return '';
+      if (!vid || !vid.videoWidth) return '';
       canvas = canvas || document.createElement('canvas');
-      const w = Math.min(720, video.videoWidth);
-      const h = Math.round(video.videoHeight * w / video.videoWidth);
+      const w = Math.min(maxW, vid.videoWidth);
+      const h = Math.round(vid.videoHeight * w / vid.videoWidth);
       canvas.width = w; canvas.height = h;
-      canvas.getContext('2d').drawImage(video, 0, 0, w, h);
-      cfg().shots = (cfg().shots || 0) + 1; save();
-      return canvas.toDataURL('image/jpeg', 0.62);
+      canvas.getContext('2d').drawImage(vid, 0, 0, w, h);
+      return canvas.toDataURL('image/jpeg', q || 0.62);
     } catch (e) { return ''; }
   }
+  function grabShot() {
+    if (!cfg().shot || !video || !video.videoWidth) return '';
+    cfg().shots = (cfg().shots || 0) + 1; save();
+    return snapURL(video, 720, 0.62);
+  }
+
+  /* ---------- 视觉巡检（每 20 秒） ---------- */
+  const V = {
+    timer: null, busy: false, stillNudged: false,
+    screenPrev: null, screenHistory: [],
+    camStream: null, camVideo: null, camPrev: null, camStill: 0, faceMiss: 0,
+    face: null, faceFailed: false,
+    ocr: null, ocrFailed: false, ocrBusy: false,
+    hits: { screen: 0, camAway: 0, camGaze: 0, camSleep: 0 }
+  };
+  const MP_BASE = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+  const OCR_WORDS = ['抖音','快手','哔哩哔哩','bilibili','b站','微博','淘宝','天猫','京东','拼多多','小红书',
+                     '爱奇艺','腾讯视频','优酷','芒果tv','王者荣耀','原神','蛋仔','斗鱼','虎牙','追剧','短视频'];
+  const CYCLE_MS = 20000;
+  let smallCanvas = null, leaveShot = '', pendingAwayAt = 0;
+
+  function loadScript(src) {
+    return new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = src; s.onload = res; s.onerror = rej;
+      document.head.appendChild(s);
+    });
+  }
+
+  async function askCam() {
+    const c = cfg();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      toast('此浏览器不支持摄像头守望'); return false;
+    }
+    try {
+      suppressUntil = Date.now() + 15000;
+      stopCam();
+      V.camStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false });
+      V.camVideo = document.createElement('video');
+      V.camVideo.muted = true; V.camVideo.playsInline = true; V.camVideo.srcObject = V.camStream;
+      V.camVideo.style.cssText = 'position:fixed;left:-9px;top:-9px;width:1px;height:1px;opacity:0;pointer-events:none';
+      document.body.appendChild(V.camVideo);
+      try { await V.camVideo.play(); } catch (e) {}
+      const track = V.camStream.getVideoTracks()[0];
+      if (track) track.addEventListener('ended', () => {
+        stopCam();
+        c.vCam = false; save(); toast('摄像头已断开，摄像头守望关闭');
+      });
+      c.vCam = true; save();
+      if (c.vFace) ensureFace();
+      return true;
+    } catch (e) {
+      stopCam();
+      c.vCam = false; save();
+      toast('未获得摄像头授权，摄像头守望未开启');
+      return false;
+    }
+  }
+  function stopCam() {
+    try { if (V.camStream) V.camStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+    try { if (V.camVideo) V.camVideo.remove(); } catch (e) {}
+    V.camStream = null; V.camVideo = null; V.camPrev = null; V.camStill = 0; V.faceMiss = 0;
+  }
+
+  async function ensureFace() {
+    if (V.face || V.faceFailed) return V.face || null;
+    try {
+      const m = await import(MP_BASE);
+      const files = await m.FilesetResolver.forVisionTasks(MP_BASE + '/wasm');
+      const opt = delegate => ({
+        baseOptions: { modelAssetPath: MP_BASE + '/models/face_landmarker.task', delegate: delegate },
+        outputFaceBlendshapes: true, runningMode: 'IMAGE'
+      });
+      try { V.face = await m.FaceLandmarker.createFromOptions(files, opt('GPU')); }
+      catch (e) { V.face = await m.FaceLandmarker.createFromOptions(files, opt('CPU')); }
+      toast('人脸识别模型已就绪（离席 / 视线 / 瞌睡）');
+    } catch (e) {
+      V.faceFailed = true;
+      toast('人脸模型加载失败（需联网），摄像头守望降级为运动检测');
+    }
+    return V.face || null;
+  }
+
+  async function ensureOcr() {
+    if (V.ocr || V.ocrFailed) return V.ocr || null;
+    try {
+      if (!window.Tesseract) await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js');
+      if (!V.ocr) V.ocr = await Tesseract.createWorker('chi_sim+eng');
+    } catch (e) {
+      V.ocrFailed = true;
+      toast('OCR 识别组件加载失败（需联网），已停用关键词识别');
+    }
+    return V.ocr || null;
+  }
+
+  function loadGray(url, w, h) {
+    return new Promise(res => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          smallCanvas = smallCanvas || document.createElement('canvas');
+          smallCanvas.width = w; smallCanvas.height = h;
+          const cx = smallCanvas.getContext('2d', { willReadFrequently: true });
+          cx.drawImage(img, 0, 0, w, h);
+          const d = cx.getImageData(0, 0, w, h).data;
+          const g = new Uint8Array(w * h);
+          for (let i = 0; i < g.length; i++) {
+            const y = (d[i*4] * 3 + d[i*4+1] * 4 + d[i*4+2]) >> 3;   // 亮度 0..223
+            g[i] = y & 0xF8;                                        // 8 级量化抗噪（摄像头传感器噪声）
+          }
+          res(g);
+        } catch (e) { res(null); }
+      };
+      img.onerror = () => res(null);
+      img.src = url;
+    });
+  }
+  async function frameChange(url, key, w, h) {
+    const g = await loadGray(url, w, h);
+    if (!g) return -1;
+    const prev = V[key];
+    V[key] = g;
+    if (!prev || prev.length !== g.length) return 0;   // 首帧只建基线
+    let s = 0;
+    for (let i = 0; i < g.length; i++) s += Math.abs(g[i] - prev[i]);
+    return s / (g.length * 224);
+  }
+
+  function visionPunish(reason, sec) {
+    suppressUntil = Date.now() + 60000;   // 判罚后冷却一分钟，防止连环罚
+    punish(sec || 40, reason, grabShot());
+  }
+
+  async function screenJudge() {
+    const c = cfg();
+    const change = await frameChange(snapURL(video, 160, 0.5), 'screenPrev', 160, 90);
+    if (change < 0) return;
+    V.screenHistory.push({ t: Date.now(), change: change });
+    if (V.screenHistory.length > 8) V.screenHistory.shift();
+    const h = V.screenHistory;
+    const still = h.length >= 6 && h.slice(-6).every(s => s.change < 0.002);
+    if (still && !V.stillNudged) {
+      V.stillNudged = true;
+      addLog('watch', '屏幕巡检：约 2 分钟画面无变化（疑似挂机发呆）');
+      save();
+      toast('屏幕久久无动静——在发呆，还是在偷懒？本宫瞅着你呢。');
+    } else if (!still) V.stillNudged = false;
+    if (c.vOcr) {
+      const kw = await ocrCheck();
+      if (kw) {
+        V.hits.screen++;
+        if (V.hits.screen >= 2) { V.hits.screen = 0; visionPunish('屏幕巡检：识别到「' + kw + '」'); }
+      } else V.hits.screen = 0;
+    }
+  }
+
+  async function ocrCheck() {
+    if (V.ocrBusy) return null; V.ocrBusy = true;
+    try {
+      const url = snapURL(video, 960, 0.75);
+      if (!url) return null;
+      const w = await ensureOcr();
+      if (!w) return null;
+      const r = await w.recognize(url);
+      const text = ((r.data && r.data.text) || '').toLowerCase().replace(/\s+/g, '');
+      for (const kw of OCR_WORDS) if (text.indexOf(kw.toLowerCase()) >= 0) return kw;
+      return null;
+    } catch (e) { return null; }
+    finally { V.ocrBusy = false; }
+  }
+
+  async function faceJudge() {
+    try {
+      const r = V.face.detect(V.camVideo);
+      const lm = r && r.faceLandmarks && r.faceLandmarks[0];
+      if (!lm) {
+        V.faceMiss++;
+        return V.faceMiss >= 2 ? 'away' : 'unknown';   // 连续两帧无人 → 离席
+      }
+      V.faceMiss = 0;
+      const L = lm[33] || {}, R = lm[263] || {}, N = lm[1] || {};
+      const faceW = Math.abs((R.x || 0) - (L.x || 0)) || 1e-6;
+      const off = ((N.x || 0) - ((L.x || 0) + (R.x || 0)) / 2) / faceW;
+      const bs = (r.faceBlendshapes && r.faceBlendshapes[0] && r.faceBlendshapes[0].categories) || [];
+      const blinkOf = n => { const f = bs.find(b => b.categoryName === n); return f ? f.score : 0; };
+      if ((blinkOf('eyeBlinkLeft') + blinkOf('eyeBlinkRight')) / 2 > 0.55) return 'sleep';
+      if (Math.abs(off) > 0.15) return 'gaze';
+      return 'present';
+    } catch (e) { return 'unknown'; }
+  }
+
+  async function motionJudge() {
+    const change = await frameChange(snapURL(V.camVideo, 160, 0.5), 'camPrev', 160, 120);
+    if (change < 0) return 'unknown';
+    if (change < 0.004) V.camStill++; else V.camStill = 0;
+    return V.camStill >= 5 ? 'away' : 'present';       // 连续 100 秒毫无动静，人多半走了
+  }
+
+  async function camJudge() {
+    const c = cfg();
+    let v = 'unknown';
+    if (c.vFace && V.face) v = await faceJudge();
+    if (v === 'unknown') v = await motionJudge();
+    if (v === 'away') {
+      if (++V.hits.camAway >= 2) { V.hits.camAway = 0; visionPunish('摄像头守望：镜头前已无人'); }
+    } else if (v === 'gaze') {
+      if (++V.hits.camGaze >= 3) { V.hits.camGaze = 0; visionPunish('摄像头守望：视线久离屏幕'); }
+    } else if (v === 'sleep') {
+      if (++V.hits.camSleep >= 2) { V.hits.camSleep = 0; visionPunish('摄像头守望：疑似打瞌睡'); }
+    } else {
+      V.hits.camAway = 0; V.hits.camGaze = 0; V.hits.camSleep = 0;
+    }
+  }
+
+  async function runVisionCycle(force) {
+    if (!force && V.busy) return;
+    if (!force && (document.hidden || !document.hasFocus())) return;   // 人不在本页时交给「离开检测」
+    const c = cfg();
+    if (!c.enabled || S.phase !== 'focus') return;
+    V.busy = true;
+    try {
+      if (c.shot && c.vScreen && video) await screenJudge();
+      if (c.vCam && V.camVideo) await camJudge();
+    } catch (e) {}
+    finally { V.busy = false; }
+  }
+  function startVision() {
+    if (V.timer) return;
+    V.hits = { screen: 0, camAway: 0, camGaze: 0, camSleep: 0 };
+    V.timer = setInterval(() => { runVisionCycle(); }, CYCLE_MS);
+  }
+  function stopVision() {
+    if (V.timer) { clearInterval(V.timer); V.timer = null; }
+  }
+
+  /* ---------- 家务循环：抑制期离开补判 + 巡检生命周期 ---------- */
+  setInterval(() => {
+    const c = cfg();
+    // 授权弹窗期间离开的：抑制期结束仍未回来则补判，从真实离开时刻起算
+    if (pendingAwayAt && !awayAt && Date.now() >= suppressUntil) {
+      if (document.hidden || !document.hasFocus()) {
+        awayAt = pendingAwayAt; pendingAwayAt = 0;
+        leaveShot = grabShot();
+        startRing(); notifyAway();
+      } else pendingAwayAt = 0;
+    }
+    // 巡检生命周期：燃香中且功能开启才跑
+    const want = c.enabled && S.phase === 'focus' && ((c.shot && c.vScreen) || c.vCam);
+    if (want && (video || V.camVideo)) startVision();
+    else stopVision();
+  }, 2000);
 
   /* ---------- 响铃与通知 ---------- */
   function playBeats() {
@@ -2932,7 +3211,7 @@ if (document.readyState !== 'loading') init();
   }
 
   /* ---------- 判罚 ---------- */
-  function punish(sec, reason) {
+  function punish(sec, reason, preShot) {
     const c = cfg();
     c.hits = (c.hits || 0) + 1;
     c.lastAway = sec;
@@ -2941,7 +3220,7 @@ if (document.readyState !== 'loading') init();
     const route = S.route || 'male';
     const line = '擅离职守 ' + sec + ' 秒！这一鞭，替你的自律打的——' +
       (route === 'female' ? '再敢分心，仔细你的皮！' : '再有下次，定不轻饶！');
-    const shot = grabShot();
+    const shot = preShot !== undefined ? preShot : grabShot();
     try { playWhip(line); } catch (e) {}
     try { speak(line, route === 'female' ? 'ladyOld' : 'elder'); } catch (e) {}
     showPunish(sec, line, shot);
@@ -2965,20 +3244,26 @@ if (document.readyState !== 'loading') init();
   /* ---------- 离开检测 ---------- */
   function onLeave() {
     if (!cfg().enabled || S.phase !== 'focus' || awayAt) return;
-    if (Date.now() < suppressUntil) return;
+    if (Date.now() < suppressUntil) { pendingAwayAt = Date.now(); return; }   // 抑制期（授权弹窗）先记下，稍后补判
+    realLeave();
+  }
+  function realLeave() {
     awayAt = Date.now();
+    leaveShot = grabShot();   // 人刚走立刻取证：回来领罚时看的是分心期间的画面
     startRing();
     notifyAway();
   }
   function onReturn() {
+    pendingAwayAt = 0;
     if (!awayAt) return;
     const away = Date.now() - awayAt;
     awayAt = 0;
     stopRing();
+    const shot = leaveShot; leaveShot = '';
     if (S.phase !== 'focus') return;
     if (Date.now() < suppressUntil) return;
     const sec = Math.round(away / 100) / 10;
-    if (sec >= cfg().leaveSec) punish(sec, '离开页面');
+    if (sec >= cfg().leaveSec) punish(sec, '离开页面', shot);
   }
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) onLeave(); else onReturn();
@@ -2987,6 +3272,9 @@ if (document.readyState !== 'loading') init();
   window.addEventListener('focus', () => onReturn());
   window.addEventListener('pagehide', () => onLeave());
   window.addEventListener('pageshow', () => onReturn());
+  window.addEventListener('storage', e => {
+    if (e.key === KEY) toast('检测到其他标签页也在运行景仁宫，进度可能互相覆盖，建议只保留一个。');
+  });
 
   /* ---------- 开始前拦截，先取得授权 ---------- */
   document.addEventListener('click', e => {
@@ -2998,6 +3286,16 @@ if (document.readyState !== 'loading') init();
     openAuth();
   }, true);
 
+  document.addEventListener('click', e => {
+    const btn = e.target && e.target.closest ? e.target.closest('#btnStart') : null;
+    if (!btn) return;
+    const c = cfg();
+    if (!c.asked || !c.enabled) return;   // 未授权的情形由上面那个拦截器处理
+    // 新会话里浏览器不会保留屏幕共享授权，借这次点击手势补要一次
+    if (c.shot && !stream) askScreen();
+    if (c.vCam && !V.camStream) askCam();
+  }, true);
+
   /* ---------- 设置面板 ---------- */
   function injectSettings() {
     const box = document.querySelector('#paneData .settings');
@@ -3007,16 +3305,31 @@ if (document.readyState !== 'loading') init();
     html.innerHTML = `
       <div class="set-row"><span>分心守望（离开即响铃鞭笞）</span><input type="checkbox" id="settingWatch"></div>
       <div class="set-row"><span>离开判定阈值（秒）</span><input type="number" id="watchLeave" min="1" max="60"></div>
-      <div class="set-row"><span>截屏留证（需屏幕共享）</span><input type="checkbox" id="settingShot"></div>`;
+      <div class="set-row"><span>截屏留证（需屏幕共享）</span><input type="checkbox" id="settingShot"></div>
+      <div class="set-row"><span>屏幕巡检（每20秒判定挂机/娱乐）</span><input type="checkbox" id="settingVision"></div>
+      <div class="set-row"><span>摄像头守望（离席/瞌睡识别）</span><input type="checkbox" id="settingCam"></div>
+      <div class="set-row"><span>OCR 关键词增强（联网加载词库）</span><input type="checkbox" id="settingOcr"></div>
+      <div class="set-row"><span>人脸姿态增强（联网加载模型）</span><input type="checkbox" id="settingFace"></div>
+      <div class="set-row"><span>分心即作废（判罚时可选废香重燃）</span><input type="checkbox" id="settingVoid"></div>`;
     const nodes = Array.from(html.children);
     nodes.forEach(n => box.insertBefore(n, anchor));
 
     const cw = box.querySelector('#settingWatch');
     const cl = box.querySelector('#watchLeave');
     const cs = box.querySelector('#settingShot');
+    const cv = box.querySelector('#settingVision');
+    const cm = box.querySelector('#settingCam');
+    const co = box.querySelector('#settingOcr');
+    const cf = box.querySelector('#settingFace');
+    const cd = box.querySelector('#settingVoid');
     cw.checked = !!cfg().enabled;
     cl.value = cfg().leaveSec;
     cs.checked = !!cfg().shot;
+    cv.checked = !!cfg().vScreen;
+    cm.checked = !!cfg().vCam;
+    co.checked = !!cfg().vOcr;
+    cf.checked = !!cfg().vFace;
+    cd.checked = !!cfg().voidPunish;
 
     cw.addEventListener('change', () => {
       const c = cfg();
@@ -3036,10 +3349,46 @@ if (document.readyState !== 'loading') init();
         const okk = await askScreen();
         cs.checked = okk;
       } else {
-        try { if (stream) stream.getTracks().forEach(t => t.stop()); } catch (e) {}
-        stream = null; video = null;
+        stopScreen();
         cfg().shot = false; save();
       }
+    });
+    cv.addEventListener('change', () => {
+      const c = cfg();
+      c.vScreen = cv.checked;
+      if (cv.checked && !stream) askScreen();   // 没有屏幕流就借这次手势要一个
+      save();
+      toast(cv.checked ? '屏幕巡检已开启（每 20 秒一次）' : '屏幕巡检已关闭');
+    });
+    cm.addEventListener('change', async () => {
+      if (cm.checked) {
+        const okk = await askCam();
+        cm.checked = okk;
+      } else {
+        stopCam();
+        cfg().vCam = false; save();
+      }
+    });
+    co.addEventListener('change', () => {
+      const c = cfg();
+      c.vOcr = co.checked;
+      if (co.checked) ensureOcr();
+      save();
+      toast(co.checked ? 'OCR 关键词增强已开启，首次需联网下载词库' : 'OCR 关键词增强已关闭');
+    });
+    cf.addEventListener('change', () => {
+      const c = cfg();
+      c.vFace = cf.checked;
+      if (cf.checked) {
+        if (V.camVideo) ensureFace();
+        else toast('先开启摄像头守望，人脸姿态增强才会生效');
+      }
+      save();
+    });
+    cd.addEventListener('change', () => {
+      cfg().voidPunish = cd.checked;
+      save();
+      toast(cd.checked ? '已开启「分心即作废」：判罚时可弃此香重燃' : '已关闭「分心即作废」');
     });
   }
 
@@ -3052,7 +3401,9 @@ if (document.readyState !== 'loading') init();
     sec.innerHTML = `
       <div class="dev-title">分心守望</div>
       <div class="dev-row"><button id="devWatchHit">模拟分心（罚）</button><button id="devWatchRing">响铃</button><button id="devWatchStop">停铃</button></div>
-      <div class="dev-row"><label>阈值(秒)</label><input type="number" id="devWatchSec" min="1" max="60"><button id="devWatchSet">设</button></div>`;
+      <div class="dev-row"><label>阈值(秒)</label><input type="number" id="devWatchSec" min="1" max="60"><button id="devWatchSet">设</button></div>
+      <div class="dev-row"><button id="devVisionCycle">手动巡检一次</button><button id="devCamOpen">开摄像头</button><button id="devCamClose">关摄像头</button></div>
+      <div class="dev-row" id="devVisionState"></div>`;
     panel.insertBefore(sec, document.getElementById('devState'));
     document.getElementById('devWatchSec').value = cfg().leaveSec;
     document.getElementById('devWatchHit').addEventListener('click', () => punish(6, '模拟分心'));
@@ -3062,6 +3413,20 @@ if (document.readyState !== 'loading') init();
       const c = cfg();
       c.leaveSec = Math.max(1, Math.min(60, parseInt(document.getElementById('devWatchSec').value, 10) || 2));
       save(); toast('离开阈值已设为 ' + c.leaveSec + ' 秒');
+    });
+    document.getElementById('devVisionCycle').addEventListener('click', async () => {
+      const out = document.getElementById('devVisionState');
+      out.textContent = '巡检中…';
+      await runVisionCycle(true);
+      const last = V.screenHistory.length ? (V.screenHistory[V.screenHistory.length - 1].change * 100).toFixed(2) + '%' : '无';
+      out.textContent = '屏幕变化率 ' + last + ' | 摄像头 ' + (V.camVideo ? '开' : '关') +
+        ' | 人脸模型 ' + (V.face ? '就绪' : (V.faceFailed ? '加载失败' : '未加载')) +
+        ' | 连击 屏' + V.hits.screen + '/离' + V.hits.camAway + '/视' + V.hits.camGaze + '/睡' + V.hits.camSleep;
+    });
+    document.getElementById('devCamOpen').addEventListener('click', () => askCam());
+    document.getElementById('devCamClose').addEventListener('click', () => {
+      stopCam(); cfg().vCam = false; save();
+      document.getElementById('devVisionState').textContent = '摄像头已关闭';
     });
   }
 
@@ -3074,7 +3439,18 @@ if (document.readyState !== 'loading') init();
     back: onReturn,
     ring: startRing,
     stop: stopRing,
-    state: () => ({ enabled: cfg().enabled, asked: cfg().asked, hits: cfg().hits, leaveSec: cfg().leaveSec, shot: cfg().shot, away: awayAt ? Date.now() - awayAt : 0, phase: S.phase })
+    ringing: () => !!ringTimer,
+    gate: fn => { if (cfg().asked) fn(); else openAuth(); },
+    askCam: askCam,
+    stopCam: stopCam,
+    patrol: force => runVisionCycle(force),
+    state: () => ({
+      enabled: cfg().enabled, asked: cfg().asked, hits: cfg().hits, leaveSec: cfg().leaveSec,
+      shot: cfg().shot, away: awayAt ? Date.now() - awayAt : 0, phase: S.phase,
+      vScreen: cfg().vScreen, vCam: cfg().vCam, vOcr: cfg().vOcr, vFace: cfg().vFace,
+      cam: !!V.camVideo, faceModel: V.face ? 'ready' : (V.faceFailed ? 'failed' : 'off'),
+      visionRunning: !!V.timer
+    })
   };
 
   /* ---------- 初始化 ---------- */
@@ -3082,6 +3458,8 @@ if (document.readyState !== 'loading') init();
     injectSettings();
     injectDev();
     cfg();
+    // 新会话恢复：摄像头授权浏览器可记住，尝试静默重取；屏幕共享必须等用户手势（点击「燃香开始」时补要）
+    if (cfg().enabled && cfg().vCam) { try { askCam(); } catch (e) {} }
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
